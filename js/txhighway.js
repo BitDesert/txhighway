@@ -1,14 +1,13 @@
 "use strict";
 
 // urls
-const urlCash = "wss://www.nanolooker.com/ws",
+const urlCash = ["wss://www.nanolooker.com/ws"],
 	urlCore = "wss://ws.blockchain.info/inv",
 	urlBtc = "api.btc.com/v3/",
 	urlBlockchainInfo = "https://api.blockchain.info/";
 
 // sockets
-const socketCash = new WebSocket(urlCash),
-	socketCore = new WebSocket(urlCore);
+const socketCore = new WebSocket(urlCore);
 
 // DOM elements
 const canvas = document.getElementById("renderCanvas"),
@@ -116,37 +115,45 @@ let txCash = [],
 	feesCash = [];
 
 // connect to sockets
-socketCash.onopen = ()=>{
-	socketCash.send(JSON.stringify({
-		"action":"subscribe",
-		"topic":"confirmation",
-		"options":{
-			"confirmation_type":"active_quorum"
+function bindNanoSocket(socket) {
+	socket.onopen = ()=>{
+		socket.send(JSON.stringify({
+			"action":"subscribe",
+			"topic":"confirmation",
+			"options":{
+				"confirmation_type":"active_quorum"
+			}
+		}));
+	}
+
+	socket.onmessage = (onmsg) =>{
+		let res = JSON.parse(onmsg.data);
+
+		var txData = {
+			"out": [res.message.account],
+			"hash": res.message.hash,
+			"inputs": [],
+			"valueOut": (res.message.amount / 1000000000000000000000000000000),
+			"isCash": true,
+			"sw": res.message.block.subtype === "change"
 		}
-	}));
+
+		newTX(true, txData);
+	}
+
+	socket.onerror = (onerr) =>{
+		console.log('Nano socket error', onerr);
+		const next = urlCash.shift();
+		if (!next) return;
+
+		urlCash.push(next);
+		bindNanoSocket(new WebSocket(next));
+	}
 }
+bindNanoSocket(new WebSocket(urlCash[urlCash.length - 1]));
 
 socketCore.onopen = ()=> {
 	socketCore.send(JSON.stringify({"op":"unconfirmed_sub"}));
-}
-
-socketCash.onmessage = (onmsg) =>{
-	let res = JSON.parse(onmsg.data);
-
-	var txData = {
-		"out": [res.message.account],
-		"hash": res.message.hash,
-		"inputs": [],
-		"valueOut": (res.message.amount / 1000000000000000000000000000000),
-		"isCash": true,
-		"sw": res.message.block.subtype === "change"
-	}
-
-	newTX(true, txData);
-}
-
-socketCash.onerror = (onerr) =>{
-	console.log('socketCash error', onerr);
 }
 
 socketCore.onmessage = (onmsg)=> {
@@ -531,10 +538,8 @@ function updateFees(isCash, fee){
 
 /* return car based upon transaction size*/
 function getCar(valueOut, isCash, userTx, sw){
-	if(sw) {
-		if (isCash)
-			return car.change;
-		return car.segwit;
+	if (sw && isCash) {
+		return car.change;
 	}
 	
 	// user tx vehicles need to go here
